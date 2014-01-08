@@ -1,5 +1,5 @@
 #include <windows.h>
-
+#include <tchar.h>
 
 #define SERVICE_NANE		TEXT("DaemonService")
 
@@ -13,6 +13,11 @@ void report_service_status(DWORD current_state, DWORD win32_exit_code, DWORD wai
 void service_init(DWORD dwArgs, LPTSTR *lpszArgv);
 void WINAPI service_main(DWORD dwArgc, LPTSTR *lpszArgv);
 void WINAPI service_ctrl_handler(DWORD dwCtrl);
+void service_remove();
+void service_install();
+void service_restart();
+void service_stop();
+void service_start();
 
 
 
@@ -100,14 +105,149 @@ void service_report_event(LPCTSTR error)
 
 }
 
+void service_install()
+{
+	// get  the file name of process
+	TCHAR filename[MAX_PATH + 2] = {0};
+	TCHAR *start = filename + 1;		
+	INT size = GetModuleFileName(NULL, start, MAX_PATH);
+	if( size <= 0 ){
+		service_report_event(TEXT("GetModuleFileName"));
+		return ;
+	}
+
+	// adjust file name for space.
+	BOOL is_space_exist = _tcschr(filename, TEXT(' ')) != NULL;
+	if( is_space_exist ){
+		filename[0] = TEXT('\"');
+		filename[size] = TEXT('\"');
+		start = filename;
+	}
+
+	// get a service control manager object handle
+	SC_HANDLE sch = OpenSCManager(NULL, NULL,  SC_MANAGER_CREATE_SERVICE);
+	if( sch == NULL ){
+		service_report_event(TEXT("OpenSCManager"));
+		return ;
+	}
+
+	SC_HANDLE sccs = CreateService(sch, SERVICE_NANE, SERVICE_NANE, SC_MANAGER_CREATE_SERVICE,
+					SERVICE_WIN32_OWN_PROCESS| SERVICE_INTERACTIVE_PROCESS, SERVICE_AUTO_START, 
+					SERVICE_ERROR_NORMAL, start, NULL, NULL, NULL, NULL, NULL);
+	if( sccs == NULL ){
+		service_report_event(TEXT("CreateService"));
+		CloseServiceHandle(sch);
+		return ;
+	}
+
+	CloseServiceHandle(sccs);
+	CloseServiceHandle(sch);
+}
+
+
+void service_remove()
+{
+	SC_HANDLE sch = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+	if( sch == NULL ){
+		service_report_event(TEXT("OpenSCManager"));
+		return ;
+	}
+
+	SC_HANDLE sccs = OpenService(sch, SERVICE_NANE, DELETE);
+	if( sccs == NULL ){
+		service_report_event(TEXT("OpenService"));
+		CloseServiceHandle(sch);
+		return ;
+	}
+
+	if( !DeleteService(sccs) ){
+		service_report_event(TEXT("DeleteService"));
+	}
+
+	CloseServiceHandle(sccs);
+	CloseServiceHandle(sch);
+}
+
+
+void service_restart()
+{
+	service_stop();
+	service_start();
+}
+
+void service_stop()
+{
+	SC_HANDLE sch = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+	if( sch == NULL ){
+		service_report_event(TEXT("OpenSCManager"));
+		return ;
+	}
+
+	SC_HANDLE sccs = OpenService(sch, SERVICE_NANE, SERVICE_STOP);
+	if( sccs == NULL ){
+		service_report_event(TEXT("OpenService"));
+		CloseServiceHandle(sch);
+		return ;
+	}
+
+	SERVICE_STATUS ss;
+	if ( !ControlService(sccs, SERVICE_CONTROL_STOP, &ss) ){
+		service_report_event(TEXT("ControlService"));
+	}
+
+	CloseServiceHandle(sccs);
+	CloseServiceHandle(sch);
+}
+
+
+void service_start()
+{
+	SC_HANDLE sch = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+	if( sch == NULL ){
+		service_report_event(TEXT("OpenSCManager"));
+		return ;
+	}
+
+	SC_HANDLE sccs = OpenService(sch, SERVICE_NANE, SERVICE_START);
+	if( sccs == NULL ){
+		service_report_event(TEXT("OpenService"));
+		CloseServiceHandle(sch);
+		return ;
+	}
+
+	if ( !StartService(sch, NULL, NULL) ){
+		service_report_event(TEXT("StartService"));
+	}
+
+	CloseServiceHandle(sccs);
+	CloseServiceHandle(sch);
+}
+
+
+
 
 int main(int argc, char **argv)
 {
-	// 	if( strcmp(argv[1], "install") == 0 ){
-	// 		service_install();
-	// 		return 0;
-	// 	}
+	if( strcmp(argv[1], "install") == 0 ){
+		service_install();
+		return 0;
+	}
 
+	if( strcmp(argv[1], "remove") == 0 ){
+		service_remove();
+	}
+
+	if ( strcmp(argv[1], "restart") == 0 ){
+		service_restart();
+	}
+
+	if ( strcmp(argv[1], "stop") == 0 ) {
+		service_stop();
+	}
+
+	if ( strcmp(argv[1], "start") == 0 ){
+		service_start();
+	}
 
 	SERVICE_TABLE_ENTRY service_table_entry[] = {
 		{
@@ -115,15 +255,11 @@ int main(int argc, char **argv)
 		},
 		{
 			NULL, NULL,
-			},
+		},
 	};
 
 	if( !StartServiceCtrlDispatcher(service_table_entry) ){
 		service_report_event(TEXT("StartServiceCtrlDispatcher"));
 	}
 }
-
-
-
-
 
